@@ -4,6 +4,8 @@
     to attack this enemy with an attack animation. 
 
     -Added GetHit functionality for enemy to take damage (5/16)
+    -Reworked statemachine to transition from attack to run (7/16)
+    -Fixed the agent.stop() function in Queued attack phase (7/24)
 
     greg drew - 5/9/16
     */
@@ -20,27 +22,26 @@ using System.Collections.Generic;
 public class ClickToMove : MonoBehaviour
 {
     //Player vars
-    private NavMeshAgent agent;
-    public int damage;
-    public int health;
-    public int maxHealth;
-    private int healthPercentage;
-
-
+    private NavMeshAgent agent;                         //This moves the player
+    public PlayerStats pStats;                          //This is the player stat class
+    
     //Anim vars
-    private AnimatorStateInfo currentBaseState; //Gets the current state of the mecanim anim controller
-    private AnimatorTransitionInfo currentTransition;
+    private AnimatorStateInfo currentBaseState;         //Gets the current state of the mecanim anim controller
+    private AnimatorTransitionInfo currentTransition;   //This is the current state of the mecanim tranistion.
     public HashIDs hashes;
     private Animator anim;
-    private bool walking;                       //Sets bool to true when NavMeshAgent is moving to destination
-    private bool attacked;                      //Sets false to end exit out of the attack animation after entered in the anim state.
-    private bool runAttacked;                   //Bool that sets the ability of the player to click to move
+    private bool isWalking;                               //Sets bool to true when NavMeshAgent is moving to destination
+    private bool isAttacking;                              //Sets false to exit out of the attack animation after entered in the anim state.
+    private bool attackBreak;                           //If false; the player can click to move. Should only be true before impact.
+    private bool clickAway;                                 //Set for if the player has clicked to move during the attack anim
 
     //Attack vars
-    public Transform Target;                    //Sets the target for attacking, set true on enemy clicked.
-    private bool enemyClicked;                  //Checks that an enemy has been clicked, moved to their position to attack
-    public bool impacted;
-    private bool attackCheck;
+    public Transform Target = null;                    //Sets the target for attacking, set true on enemy clicked.
+    public float attackBreakMeasure;                   //Sets at which point in the attack state clicking away breaks the animation.
+    public bool impacted;                      //Turns true when the player "lands" a hit. Deals damage at this point in the anim to the enemy. This should only be true once per attack anim.
+    public GameObject Enemy;
+    private bool enemyClicked;                  //Checks that an enemy has been clicked, moved to their position to attack. When true this loops the attack function. Should only be true once per impact.
+    private bool attackToRun;               //Checks when the player has landed a hit and can transition back to running. True to return to run state from attack state.
 
     //Movement vars
     private Quaternion _lookRotation;           //Placeholder for the direction for the transform to turn
@@ -53,85 +54,97 @@ public class ClickToMove : MonoBehaviour
     {
         agent = GetComponent<NavMeshAgent>();
         anim = GetComponent<Animator>();
-
-        //intiatize the variable to use it.
         hashes = GetComponent<HashIDs>();
-
+        pStats = GetComponent<PlayerStats>();
     }
 
     // Update is called once per frame
     void Update()
     {
+        //Basic init
+        currentBaseState = anim.GetCurrentAnimatorStateInfo(0);             //Gets the current base state of the anim state machine
+        currentTransition = anim.GetAnimatorTransitionInfo(0);
+
+
         //Checks to keep in running state if destination has not been reached
         if (agent.remainingDistance <= agent.stoppingDistance)
         {
             if (!agent.hasPath || Mathf.Abs(agent.velocity.sqrMagnitude) < float.Epsilon)
             {
-                walking = false;
+                isWalking = false;
+                //Debug.Log("Yet another log");
             }
         }
         else
         {
-            walking = true;
+            isWalking = true;
         }
 
 
         if (Input.GetMouseButtonDown(1))
         {
-            anim.SetBool(hashes.attackBool, attacked);
+            anim.SetBool(hashes.attackBool, isAttacking);
         }
 
         //Moves to enemy to attack, or if in range attacks.
-        if (enemyClicked)
-        {
-            Attack();
-        }
-
-        //Sets the Target(enemy) variable to null if idle state.
-        if (currentBaseState.fullPathHash == hashes.idleState && !enemyClicked)
-        {
-            //Target = null;
-            //attacked = false;
-        }
-
-
-        //Debug.Log(" is" + runAttacked);
-        //Debug.Log("attacked is " + attacked);
-
-        //if (IsFacing())
+        //if (enemyClicked)
         //{
-        //    Debug.Log("Facing");
+        //    Attack();
+        //    Debug.Log("Attack1");
         //}
 
-        //if (!IsFacing())
-        //{
-        //    Debug.Log("Not facing");
-        //}
+        //Logic statements
+
+        //Debug.Log("enemyclicked is " + enemyClicked);
+        //Debug.Log("impacted is " + impacted);
+        //Debug.Log("attackBreak is " + attackBreak);
+        //Debug.Log("isAttacking " + isAttacking);
+        //Debug.Log("attacktorun" + attackToRun);
+
+        //checks 
+        if (agent.remainingDistance >= agent.stoppingDistance)
+        {
+            //Debug.Log("Path not complete");
+        }
+        if (agent.hasPath)
+        {
+            //Debug.Log("Has path");
+        }
+
 
         //Checks the transition 
-        currentTransition = anim.GetAnimatorTransitionInfo(0);
 
-        //This logs to the console when the anim state is transitioning from running to attacking,
-        //keep this around because when the transition time is beyond a certain length the player is
-        //able to click away at the moment of attack. Setting runAttacked true so the player cannot click away.
-        if (currentTransition.IsName("Run -> Attack"))
+        //
+        //if (anim.GetAnimatorTransitionInfo(0).IsName("Base Layer.Run -> Base Layer.Attack"))
+        //{
+        //    Debug.Log("iii00");
+        //}
+
+        //This sets the bool false when transitioning out of attack state.
+        if (anim.GetAnimatorTransitionInfo(0).IsName("Attack -> Idle") || anim.GetAnimatorTransitionInfo(0).IsName("Attack -> Run"))
         {
-            Debug.Log("Attack transition");
-            runAttacked = true;
-
+            attackToRun = false;
         }
-
         //float attackDist = 2f;
         //float distance = Vector3.Distance(Target.transform.position, transform.position);
         //if (distance <= attackDist)
         //{
         //    Debug.Log("In attack range");
         //}
+
+        //Update function state sets.
+        anim.SetBool(hashes.runBool, isWalking);
+        //anim.SetBool(hashes.attackBool, attackBreak);
+
+
+        //Misc updates
+        Enemy = Target.gameObject;     
+        
     }
 
     void FixedUpdate()
     {
-        currentBaseState = anim.GetCurrentAnimatorStateInfo(0);             //Gets the current base state of the anim state machine
+        //currentBaseState = anim.GetCurrentAnimatorStateInfo(0);             //Gets the current base state of the anim state machine
 
         if (Input.GetMouseButton(0))
         {
@@ -139,118 +152,220 @@ public class ClickToMove : MonoBehaviour
 
             if (Physics.Raycast(Camera.main.ScreenPointToRay(Input.mousePosition), out hit, 1000))
             {
-                if (hit.collider.CompareTag("Enemy") && !runAttacked)
+                if (hit.collider.CompareTag("Enemy"))
                 {
-                    Target = hit.transform;
-                    enemyClicked = true;
-                    //agent.Stop();
-
-                }
-                else if (!hit.collider.CompareTag("Player") && !runAttacked)
-                {
-                    // agent.Stop();
-                    agent.destination = hit.point;
-                    enemyClicked = false;
-                    anim.SetBool(hashes.attackBool, enemyClicked);
-                    agent.Resume();
+                    if (!attackBreak)
+                    {
+                        Target = hit.transform;
+                        enemyClicked = true;
+                    }
+                    if (attackBreak)
+                    {
+                        // Target = hit.transform;
+                        //Debug.Log("uppp");
+                    }
 
                 }
 
 
+                else if (!hit.collider.CompareTag("Player"))
+                {
+                    if (!attackBreak)
+                    {
+                        agent.destination = hit.point;
+                        enemyClicked = false;
+                        //anim.SetBool(hashes.attackBool, enemyClicked);
+                        agent.Resume();
+                    }
+                    if (attackBreak && !clickAway)
+                    {
+                        agent.destination = hit.point;
+                        //Debug.Log("wewewe");
+                    }
+                }
             }
         }
 
-        //This checks the range difference between the targets to set the attacked var false.
-        //The player can still attack if out of range, this checks to make sure the player's
-        //Attack anim only plays when attacking.
-        float attackDist = 2f;
-        float distance = Vector3.Distance(Target.transform.position, transform.position);
-        if (distance <= attackDist || Target == null)
+        if (enemyClicked)
         {
-            attacked = false;
-        }
+            float attackDist = 1.3f;
+            if (Target == null)
+                return;
 
-        float playBackTime = currentBaseState.normalizedTime % 1;       //This sets the time of the animation (normalized) to a var
+            agent.destination = Target.position;
 
-
-
-        //This if statement checks if the mecanim animation state has entered the attack state. If the attack state has been reached
-        // it sets the enemyClicked false, sets the attacked bool false. (This wouldn't exit unless 
-        // set up in this statement.) Sets the navAgent destination to the current in world destination.
-        if (currentBaseState.fullPathHash == hashes.attackState)
-        {
-            enemyClicked = false;
-            attacked = false;
-            //runAttacked = true;
-            anim.SetBool(hashes.attackBool, attacked);
-            agent.destination = this.transform.position;
-            // agent.Stop();
-
-            if (playBackTime > 0.5f && !impacted)
+            if (agent.remainingDistance >= attackDist)
             {
-                // Debug.Log("Playback time is: " + playBackTime);
-                Target.GetComponent<EnemyScript>().GetHit(damage);
-                impacted = true;
+                agent.Resume();
+                //Debug.Log("resume");
             }
+
+            if (agent.remainingDistance <= attackDist)
+            {
+                Attack();
+                //Debug.Log("attack");
+            }
+            //Debug.Log("Attack1");
         }
 
-        //This function checks if player is not in attack state, and if so
-        //Finds the vector pointing from our position to the target (_direction),
-        //Creates a rotation we need to be in to look at the target (_lookRotation),
-        //Then rotates over time towards enemy position.
-        if (enemyClicked && currentBaseState.fullPathHash != hashes.attackState)
+        if (anim.GetAnimatorTransitionInfo(0).IsName("Run -> Attack"))
         {
-            _direction = (Target.position - transform.position).normalized;
-            _lookRotation = Quaternion.LookRotation(_direction);
-            transform.rotation = Quaternion.Lerp(transform.rotation, _lookRotation, Time.deltaTime * RotationSpeed);
+            Debug.Log("iii00");
         }
 
-        //Sets impact false when the impacted is true and the state machine is in idle state
-        if (impacted && currentBaseState.fullPathHash == hashes.idleState)
+        if (currentBaseState.fullPathHash == hashes.attackState && currentBaseState.normalizedTime > .20)
         {
-            impacted = false;
+            anim.ResetTrigger(hashes.attackTrig);
+            enemyClicked = false;
+            attackBreak = false;
 
+            Strike(pStats.damage);
+            //Debug.Log("poop1");
         }
+        //Doesnt allow attacking if out of distance
+        //float attackDist = 2f;
+        //float distance = Vector3.Distance(Target.transform.position, transform.position);
+        //if (distance <= attackDist || Target == null)
+        //{
+        //    isAttacking = false;
+        //}
 
-        //This function sets runAttacked to false so the players can only move if in run/idle state
-        if (currentBaseState.fullPathHash == hashes.idleState || currentBaseState.fullPathHash == hashes.runState)
-        {
-            runAttacked = false;
-            Debug.Log("eeeeeeee");
-        }
+        ////PRE ATTACK
+        //if (currentBaseState.fullPathHash == hashes.attackState && currentBaseState.normalizedTime < .09)
+        //{
+        //    enemyClicked = false;
+        //    attackBreak = true;
+        //    //Debug.Log("Pre attack");
+        //}
+        ////ATTACK PHASE 1
+        ////This if statement checks if the mecanim animation state has entered the attack state. If the attack state has been reached
+        //// it, this sets the enemyClicked false to exit attack state, sets the isAttacking bool false. (This won't exit unless 
+        //// set up in this statement.) Sets the navAgent to current destination.
+        //if (currentBaseState.fullPathHash == hashes.attackState && !impacted && currentBaseState.normalizedTime < .11)
+        //{
+        //    enemyClicked = false;
+        //    //attackBreak = false;
+        //    isAttacking = false;
+        //    anim.SetBool(hashes.attackBool, isAttacking);
+        //    agent.ResetPath();
+        //    Debug.Log("Phase 1");
+        //}
 
-        anim.SetBool(hashes.runBool, walking);
+        ////ATTACK PHASE 2
+        ////This statement sets impact and does damage to enemy, allows the player to move once they have impacted.
+        //if (currentBaseState.fullPathHash == hashes.attackState && currentBaseState.normalizedTime > attackBreakMeasure)
+        //{
+        //    Target.GetComponent<GetDamaged>().GetHit(pStats.damage);
+        //    impacted = true;
+        //    attackBreak = false;
+        //    clickAway = true;
+        //    //enemyClicked = false;
+        //    agent.Resume();
+        //    //if (agent.hasPath)
+        //    //{
+        //    //    enemyClicked = true;
+        //    //}
+        //    Debug.Log("Phase2");
+        //}
+
+        ////ATTACK PHASE 3
+        ////This resets the impact, it begins right before the mecanim transition to run state if attackToRun was true.
+        //if (currentBaseState.fullPathHash == hashes.attackState && !agent.hasPath && currentBaseState.normalizedTime > .95)
+        //{
+        //    impacted = false;
+        //    enemyClicked = false;
+        //    attackToRun = false;
+        //    Debug.Log("phase 3");
+        //}
+
+        ////This statement faces the target while attacking.
+        //if (enemyClicked && currentBaseState.fullPathHash != hashes.attackState)
+        //{
+        //    _direction = (Target.position - transform.position).normalized;
+        //    _lookRotation = Quaternion.LookRotation(_direction);
+        //    transform.rotation = Quaternion.Lerp(transform.rotation, _lookRotation, Time.deltaTime * RotationSpeed);
+        //}
+
+        ////RESET PHASE
+        ////This function sets attackBreak to false when the player is not in attack state, allowing the player to move.
+        //if (impacted && currentBaseState.fullPathHash == hashes.idleState || currentBaseState.fullPathHash == hashes.runState)
+        //{
+        //    attackBreak = false;
+        //    impacted = false;
+        //    clickAway = false;
+        //    anim.SetBool(hashes.attackBreak, attackBreak);
+        //    //enemyClicked = false;
+        //    //Debug.Log("Reset");
+
+        //}
+
+        ////QUEUED RUN PHASE (RUNS AFTER A DESTINATION HAS BEEN SET DURING ATTACK PHASE)
+        ////This statement stops the player from moving during the attack animation.
+        //if (!agent.hasPath && currentBaseState.fullPathHash == hashes.attackState && attackBreak)
+        //{
+        //    agent.Stop();
+        //    //Debug.Log("Queued");
+        //}
+
+        //if (currentBaseState.fullPathHash == hashes.attackState && currentBaseState.normalizedTime > attackBreakMeasure 
+        //    && agent.hasPath == true && agent.velocity.sqrMagnitude > 0)
+        //{
+        //    attackToRun = true;
+        //    anim.SetBool(hashes.attackBreak, attackToRun);
+        //    Debug.Log("Transition run");
+        //}
+
+
+        //if (impacted && currentBaseState.fullPathHash == hashes.attackState)
+        //{
+        //    attackBreak = false;
+        //    impacted = false;
+        //    //attackToRun = false;
+        //    Debug.Log("poop");
+        //}
+        //currentTransition = anim.GetAnimatorTransitionInfo(0);
+
+        ////
+        //if (anim.GetAnimatorTransitionInfo(0).IsName("Run -> Attack"))
+        //{
+        //    Debug.Log("iii00");
+        //}
 
     }
 
     // This function checks first if any enemy object is targeted. Sets the navAgent destination to the target enemy transform
     // if not returned. If the distance is greater than the attacking distance, it moves the navAgent to that destination. If 
-    // within attack range, sets the attack bool true for state change. Sets walking bool false to stop walking anim.
+    // within attack range, sets the attack bool true for state change. Sets isWalking bool false to stop isWalking anim.
     private void Attack()
     {
-        float attackDist = 1.5f;
-        if (Target == null)
-            return;
+        //float attackDist = 1.3f;
+        //if (Target == null)
+        //    return;
 
-        agent.destination = Target.position;
-        currentBaseState = anim.GetCurrentAnimatorStateInfo(0);
+        //agent.destination = Target.position;
+        ////currentBaseState = anim.GetCurrentAnimatorStateInfo(0);
 
-        if (agent.remainingDistance >= attackDist)
-        {
-            agent.Resume();
-        }
+        //if (agent.remainingDistance >= attackDist)
+        //{
+        //    agent.Resume();
+        //    //Debug.Log("Running");
+        //}
 
-        if (agent.remainingDistance <= attackDist)
-        {
-            agent.Stop();
-            runAttacked = true;
-            walking = false;
+        //if (agent.remainingDistance <= attackDist)
+        //{
+        //    //agent.Stop();
+        //    attackBreak = true;
+        //    isWalking = false;
+        //    isAttacking = true;
+        //    //enemyClicked = false;
+        //    //anim.SetBool(hashes.attackBool, isAttacking);
+        //    anim.SetTrigger(hashes.attackTrig);
+        //    //isAttacking = true;
+        //    Debug.Log("slap");
+        //}
 
-
-            anim.SetBool(hashes.attackBool, attacked);
-            attacked = true;
-
-        }
+        anim.SetTrigger(hashes.attackTrig);
+        //Debug.Log("in it");
     }
 
     //Bool function to check if the tansform of the player GO is facing the Target variable. Angle of 30 gives a good approx.
@@ -261,5 +376,9 @@ public class ClickToMove : MonoBehaviour
         return (Vector3.Angle(transform.forward, Target.transform.position - transform.position) < angle);
     }
 
+    void Strike(int damage)
+    {
+        Target.GetComponent<GetDamaged>().GetHit(damage);
 
+    }
 }
